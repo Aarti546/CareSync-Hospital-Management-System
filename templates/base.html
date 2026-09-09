@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}CarePulse Hospital Management System{% endblock %}</title>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- CSS Stylesheet -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="brand">
+            <div class="brand-icon">🏥</div>
+            <div class="brand-text">
+                <h2>CarePulse</h2>
+                <span>Hospital HMS</span>
+            </div>
+        </div>
+
+        <ul class="nav-menu">
+            <li class="nav-item {% if request.endpoint == 'dashboard' %}active{% endif %}">
+                <a href="{{ url_for('dashboard') }}">
+                    <span>🏠</span> Home Dashboard
+                </a>
+            </li>
+            <li class="nav-item {% if request.endpoint == 'patients_list' %}active{% endif %}">
+                <a href="{{ url_for('patients_list') }}">
+                    <span>👤</span> Patients
+                </a>
+            </li>
+            <li class="nav-item {% if request.endpoint == 'doctors_list' %}active{% endif %}">
+                <a href="{{ url_for('doctors_list') }}">
+                    <span>👨‍⚕️</span> Doctors
+                </a>
+            </li>
+            <li class="nav-item {% if request.endpoint == 'appointments_list' %}active{% endif %}">
+                <a href="{{ url_for('appointments_list') }}">
+                    <span>📅</span> Appointments
+                </a>
+            </li>
+            <li class="nav-item {% if request.endpoint == 'queue_view' %}active{% endif %}">
+                <a href="{{ url_for('queue_view') }}">
+                    <span>⏳</span> Waiting Queue (FIFO)
+                </a>
+            </li>
+        </ul>
+
+        <div class="sidebar-footer">
+            <div class="admin-avatar">AD</div>
+            <div>
+                <div style="font-size: 13.5px; font-weight: 700; color: #fff;">Admin Reception</div>
+                <div style="font-size: 11px; color: #94a3b8;">CarePulse Medical Center</div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+        
+        <!-- Header / Topbar -->
+        <header class="topbar">
+            <div class="topbar-left">
+                <div class="page-title">
+                    <h2>{% block page_title %}Hospital Dashboard{% endblock %}</h2>
+                </div>
+            </div>
+
+            <div class="topbar-right">
+                <div class="db-badge">
+                    <span class="pulse-indicator"></span>
+                    <span>Database: {{ db_type|default('MySQL') }}</span>
+                </div>
+                <button class="btn btn-primary btn-sm" onclick="openModal('quickBookModal')">
+                    <span>📅</span> Book Appointment
+                </button>
+            </div>
+        </header>
+
+        <!-- Body Section -->
+        <div class="content-body">
+            
+            <!-- Flash Notifications -->
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    <div class="flash-messages">
+                        {% for category, message in messages %}
+                            <div class="alert alert-{{ category }}">
+                                <span>{{ message }}</span>
+                                <button type="button" style="background:none; border:none; cursor:pointer; font-weight:bold;" onclick="this.parentElement.remove()">✕</button>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+            {% endwith %}
+
+            {% block content %}{% endblock %}
+
+        </div>
+    </main>
+
+    <!-- Global Quick Booking Modal -->
+    <div id="quickBookModal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>📅 Book New Appointment</h3>
+                <button class="btn-close" onclick="closeModal('quickBookModal')">&times;</button>
+            </div>
+            
+            <form action="{{ url_for('book_appointment') }}" method="POST" onsubmit="return validateBookingForm(this)">
+                <div class="form-group">
+                    <label>Select Patient *</label>
+                    <select name="patient_id" class="form-control" required>
+                        <option value="">-- Choose Patient --</option>
+                        {% for pt in (patients|default([])) %}
+                            <option value="{{ pt.patient_id }}">{{ pt.name }} (ID: #{{ pt.patient_id }}, {{ pt.phone }})</option>
+                        {% endfor %}
+                    </select>
+                    <small style="color:#64748b; font-size:11.5px;">Need a new patient? Add via <a href="{{ url_for('patients_list') }}" style="color:#0284c7;">Patients page</a>.</small>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Select Doctor *</label>
+                        <select name="doctor_id" id="bookDoctorSelect" class="form-control" required>
+                            <option value="">-- Choose Doctor --</option>
+                            {% for doc in (doctors|default([])) %}
+                                <option value="{{ doc.doctor_id }}">{{ doc.name }} ({{ doc.department }})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Appointment Date *</label>
+                        <input type="date" name="appointment_date" id="bookDateInput" class="form-control" value="{{ today_str }}" min="{{ today_str }}" required>
+                    </div>
+                </div>
+
+                <!-- Live Slot Selection Grid (Double Booking Prevention) -->
+                <div class="form-group">
+                    <label>Select Time Slot (Double Booking Protected) *</label>
+                    <input type="hidden" name="appointment_time" id="selectedTimeInput" required>
+                    <div class="slot-grid-container" id="slotsContainer">
+                        <p style="font-size:13px; color:#64748b;">Select a doctor and date above to load live available slots.</p>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Initial Status</label>
+                        <select name="status" class="form-control">
+                            <option value="Confirmed" selected>Confirmed</option>
+                            <option value="Waiting">Waiting (Add to FIFO Queue)</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Reason for Visit</label>
+                        <input type="text" name="reason" class="form-control" placeholder="e.g. Heart Checkup, Fever, Consultation">
+                    </div>
+                </div>
+
+                <div style="display:flex; justify-content:flex-end; gap:12px; margin-top:20px;">
+                    <button type="button" class="btn btn-outline" onclick="closeModal('quickBookModal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Confirm Booking</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Master JavaScript -->
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

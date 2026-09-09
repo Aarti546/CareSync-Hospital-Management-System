@@ -1,0 +1,220 @@
+{% extends "base.html" %}
+
+{% block title %}Patient Management | CarePulse Hospital{% endblock %}
+{% block page_title %}Patient Directory & Registry{% endblock %}
+
+{% block content %}
+
+<!-- Header Action & Search Bar -->
+<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px;">
+    <!-- Search Bar -->
+    <form action="{{ url_for('patients_list') }}" method="GET" style="display:flex; gap:10px; width:450px;">
+        <input type="text" name="search" class="form-control" placeholder="Search by Patient ID, Name, or Phone (e.g. 1, Rahul, 98111)..." value="{{ search_query }}">
+        <button type="submit" class="btn btn-primary btn-sm">🔍 Search</button>
+        {% if search_query %}
+            <a href="{{ url_for('patients_list') }}" class="btn btn-outline btn-sm">Clear</a>
+        {% endif %}
+    </form>
+
+    <button class="btn btn-teal" onclick="openModal('addPatientModal')">
+        <span>➕</span> Register New Patient
+    </button>
+</div>
+
+<!-- Patients List Table -->
+<div class="card">
+    <div class="card-header">
+        <div class="card-title">
+            <h3>Registered Patients</h3>
+            <span style="font-size:12px; background:#e0f2fe; color:#0369a1; padding:3px 10px; border-radius:9999px; font-weight:700;">
+                {{ patients|length }} Total
+            </span>
+        </div>
+    </div>
+
+    {% if patients and patients|length > 0 %}
+        <div class="table-wrap">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Patient ID</th>
+                        <th>Name</th>
+                        <th>Age / Gender</th>
+                        <th>Contact Phone</th>
+                        <th>Email</th>
+                        <th>Blood Group</th>
+                        <th>Address</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for pt in patients %}
+                        <tr>
+                            <td>
+                                <strong style="color:#0284c7;">#P-{{ pt.patient_id }}</strong>
+                            </td>
+                            <td>
+                                <div style="font-weight:700; color:#0f172a;">{{ pt.name }}</div>
+                            </td>
+                            <td>{{ pt.age }} yrs / {{ pt.gender }}</td>
+                            <td>{{ pt.phone }}</td>
+                            <td style="color:#64748b; font-size:12.5px;">{{ pt.email or 'N/A' }}</td>
+                            <td>
+                                <span style="font-weight:700; background:#fee2e2; color:#991b1b; padding:2px 8px; border-radius:6px; font-size:12px;">
+                                    {{ pt.blood_group or 'N/A' }}
+                                </span>
+                            </td>
+                            <td style="color:#475569; font-size:12.5px; max-width:200px;">{{ pt.address or 'N/A' }}</td>
+                            <td>
+                                <div style="display:flex; gap:6px;">
+                                    <button class="btn btn-outline btn-sm edit-pt-btn" 
+                                            data-id="{{ pt.patient_id }}"
+                                            data-name="{{ pt.name }}"
+                                            data-age="{{ pt.age }}"
+                                            data-gender="{{ pt.gender }}"
+                                            data-phone="{{ pt.phone }}"
+                                            data-email="{{ pt.email }}"
+                                            data-blood="{{ pt.blood_group }}"
+                                            data-address="{{ pt.address }}">
+                                        ✏️ Edit
+                                    </button>
+                                    <form action="{{ url_for('delete_patient', patient_id=pt.patient_id) }}" method="POST" onsubmit="return confirm('Are you sure you want to delete patient {{ pt.name }}?');" style="display:inline;">
+                                        <button type="submit" class="btn btn-danger btn-sm">🗑️</button>
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <div style="text-align:center; padding:40px; color:#64748b;">
+            <p>No patients found matching your search.</p>
+        </div>
+    {% endif %}
+</div>
+
+<!-- Modal: Add New Patient -->
+<div id="addPatientModal" class="modal-overlay">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>➕ Register New Patient</h3>
+            <button class="btn-close" onclick="closeModal('addPatientModal')">&times;</button>
+        </div>
+        <form action="{{ url_for('add_patient') }}" method="POST">
+            <div class="form-group">
+                <label>Full Name *</label>
+                <input type="text" name="name" class="form-control" placeholder="e.g. Rahul Sharma" required>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Age *</label>
+                    <input type="number" name="age" class="form-control" placeholder="24" min="1" max="120" required>
+                </div>
+                <div class="form-group">
+                    <label>Gender *</label>
+                    <select name="gender" class="form-control" required>
+                        <option value="Male">Male</option>
+                        <option value="Female">Female</option>
+                        <option value="Other">Other</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Phone Number *</label>
+                    <input type="tel" name="phone" class="form-control" placeholder="+91 98765 43210" required>
+                </div>
+                <div class="form-group">
+                    <label>Blood Group</label>
+                    <select name="blood_group" class="form-control">
+                        <option value="A+">A+</option>
+                        <option value="A-">A-</option>
+                        <option value="B+">B+</option>
+                        <option value="B-">B-</option>
+                        <option value="O+">O+</option>
+                        <option value="O-">O-</option>
+                        <option value="AB+">AB+</option>
+                        <option value="AB-">AB-</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Email Address</label>
+                <input type="email" name="email" class="form-control" placeholder="patient@example.com">
+            </div>
+            <div class="form-group">
+                <label>Address</label>
+                <textarea name="address" class="form-control" rows="2" placeholder="Full residential street, area, city"></textarea>
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:12px; margin-top:20px;">
+                <button type="button" class="btn btn-outline" onclick="closeModal('addPatientModal')">Cancel</button>
+                <button type="submit" class="btn btn-primary">Save Patient</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Modal: Edit Patient -->
+<div id="editPatientModal" class="modal-overlay">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>✏️ Update Patient Record</h3>
+            <button class="btn-close" onclick="closeModal('editPatientModal')">&times;</button>
+        </div>
+        <form id="editPatientForm" method="POST">
+            <div class="form-group">
+                <label>Full Name *</label>
+                <input type="text" name="name" id="editPtName" class="form-control" required>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Age *</label>
+                    <input type="number" name="age" id="editPtAge" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label>Gender *</label>
+                    <select name="gender" id="editPtGender" class="form-control" required>
+                        <option value="Male">Male</option>
+                        <option value="Female">Female</option>
+                        <option value="Other">Other</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Phone Number *</label>
+                    <input type="tel" name="phone" id="editPtPhone" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label>Blood Group</label>
+                    <select name="blood_group" id="editPtBlood" class="form-control">
+                        <option value="A+">A+</option>
+                        <option value="A-">A-</option>
+                        <option value="B+">B+</option>
+                        <option value="B-">B-</option>
+                        <option value="O+">O+</option>
+                        <option value="O-">O-</option>
+                        <option value="AB+">AB+</option>
+                        <option value="AB-">AB-</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Email Address</label>
+                <input type="email" name="email" id="editPtEmail" class="form-control">
+            </div>
+            <div class="form-group">
+                <label>Address</label>
+                <textarea name="address" id="editPtAddress" class="form-control" rows="2"></textarea>
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:12px; margin-top:20px;">
+                <button type="button" class="btn btn-outline" onclick="closeModal('editPatientModal')">Cancel</button>
+                <button type="submit" class="btn btn-primary">Update Patient</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% endblock %}

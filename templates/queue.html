@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+
+{% block title %}Patient Waiting Queue | CarePulse Hospital{% endblock %}
+{% block page_title %}Patient Waiting Room (FIFO Queue){% endblock %}
+
+{% block content %}
+
+<!-- Queue DSA Banner -->
+<div style="background:linear-gradient(135deg, #0b1329 0%, #1e3a8a 60%, #0d9488 100%); border-radius:var(--radius-lg); padding:28px 32px; color:var(--white); box-shadow:var(--shadow-lg); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:20px;">
+    <div>
+        <div style="display:inline-flex; align-items:center; gap:8px; background:rgba(56,189,248,0.2); border:1px solid rgba(56,189,248,0.4); padding:4px 12px; border-radius:9999px; font-size:12px; font-weight:700; color:#38bdf8; margin-bottom:8px;">
+            <span>🧠 Data Structure: Queue (FIFO)</span>
+        </div>
+        <h2 style="font-family:var(--font-heading); font-size:24px; font-weight:700; margin-bottom:6px;">
+            Real-Time Patient Consultation Queue
+        </h2>
+        <p style="color:#bae6fd; font-size:14px; max-width:560px;">
+            Implemented using Python's <code>collections.deque</code> for O(1) time complexity. The first patient arrived (head) gets served first by the doctor.
+        </p>
+    </div>
+
+    <!-- Call Next Action Button -->
+    <div>
+        <form action="{{ url_for('call_next') }}" method="POST" style="margin:0;">
+            <button type="submit" class="btn btn-teal" style="font-size:15px; padding:12px 24px;" {% if total_waiting == 0 %}disabled style="opacity:0.6; cursor:not-allowed;"{% endif %}>
+                <span>🔔</span> Call Next Patient (Dequeue)
+            </button>
+        </form>
+    </div>
+</div>
+
+<!-- Active Serving vs Next in Line Overview -->
+<div style="display:grid; grid-template-columns: 1fr 2fr; gap:24px;">
+    
+    <!-- Next in Line Highlight -->
+    <div class="card" style="border:2px solid #0284c7; background:#f0f9ff;">
+        <div class="card-header">
+            <div class="card-title">
+                <h3>⭐ Next In Line</h3>
+            </div>
+            <span style="font-size:11px; font-weight:800; background:#0284c7; color:#fff; padding:3px 8px; border-radius:9999px;">
+                QUEUE HEAD
+            </span>
+        </div>
+
+        {% if next_patient %}
+            <div style="display:flex; flex-direction:column; gap:12px; padding:10px 0;">
+                <div style="font-size:32px; font-weight:800; color:#0284c7; font-family:var(--font-heading);">
+                    Token #{{ next_patient.token_id }}
+                </div>
+                <div>
+                    <h3 style="font-size:18px; font-weight:700; color:#0f172a;">{{ next_patient.patient_name }}</h3>
+                    <div style="font-size:13px; color:#64748b;">Age: {{ next_patient.age }} &bull; Blood: {{ next_patient.blood_group }}</div>
+                    <div style="font-size:13px; color:#64748b;">Phone: {{ next_patient.phone }}</div>
+                </div>
+                <div style="padding-top:12px; border-top:1px solid #bae6fd; font-size:13px;">
+                    <div>👨‍⚕️ <strong>Doctor:</strong> {{ next_patient.doctor_name }}</div>
+                    <div>🏥 <strong>Department:</strong> {{ next_patient.department }}</div>
+                    <div>⏰ <strong>Joined Queue:</strong> {{ next_patient.joined_time }}</div>
+                    <div>📋 <strong>Reason:</strong> {{ next_patient.reason }}</div>
+                </div>
+
+                <form action="{{ url_for('call_next') }}" method="POST" style="margin-top:10px;">
+                    <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center;">
+                        Serve Patient Now &rarr;
+                    </button>
+                </form>
+            </div>
+        {% else %}
+            <div style="text-align:center; padding:30px 10px; color:#64748b;">
+                <div style="font-size:36px; margin-bottom:8px;">☕</div>
+                <p>Waiting queue is currently empty.</p>
+                <small>No patients waiting for consultation.</small>
+            </div>
+        {% endif %}
+    </div>
+
+    <!-- Entire Waiting Queue Line -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-title">
+                <h3>Full Waiting Line</h3>
+                <span style="font-size:12px; background:#e0f2fe; color:#0369a1; padding:3px 10px; border-radius:9999px; font-weight:700;">
+                    {{ total_waiting }} Waiting
+                </span>
+            </div>
+        </div>
+
+        {% if waiting_list and waiting_list|length > 0 %}
+            <div class="table-wrap">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Position</th>
+                            <th>Token</th>
+                            <th>Patient</th>
+                            <th>Assigned Doctor</th>
+                            <th>Wait Since</th>
+                            <th>Reason</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for ticket in waiting_list %}
+                            <tr {% if loop.first %}style="background:#f0f9ff;"{% endif %}>
+                                <td>
+                                    <strong style="font-size:14px; color:#0f172a;">#{{ loop.index }}</strong>
+                                    {% if loop.first %}<span style="font-size:10px; color:#0284c7; font-weight:800; margin-left:4px;">NEXT</span>{% endif %}
+                                </td>
+                                <td>
+                                    <span style="font-size:12.5px; font-weight:700; color:#0284c7; background:#e0f2fe; padding:3px 8px; border-radius:6px;">
+                                        #{{ ticket.token_id }}
+                                    </span>
+                                </td>
+                                <td>
+                                    <div style="font-weight:700; color:#0f172a;">{{ ticket.patient_name }}</div>
+                                    <div style="font-size:11.5px; color:#64748b;">{{ ticket.phone }}</div>
+                                </td>
+                                <td>
+                                    <div style="font-weight:600;">{{ ticket.doctor_name }}</div>
+                                    <div style="font-size:11.5px; color:#0284c7;">{{ ticket.department }}</div>
+                                </td>
+                                <td>{{ ticket.joined_time }}</td>
+                                <td style="color:#475569; font-size:12.5px;">{{ ticket.reason }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div style="text-align:center; padding:40px; color:#64748b;">
+                <p>All appointments for today are either completed or confirmed for future time slots.</p>
+                <p style="font-size:12px; margin-top:6px;">To queue a patient, select <strong>Waiting</strong> status on any appointment.</p>
+            </div>
+        {% endif %}
+    </div>
+
+</div>
+
+{% endblock %}
