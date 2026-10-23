@@ -42,7 +42,10 @@ CREATE TABLE IF NOT EXISTS appointments (
     reason TEXT,
     status VARCHAR(20) DEFAULT 'Confirmed',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    waiting_since TIMESTAMP NULL,
+    active_appointment_time VARCHAR(20)
+        GENERATED ALWAYS AS (CASE WHEN status <> 'Cancelled' THEN appointment_time ELSE NULL END) STORED,
     FOREIGN KEY (patient_id) REFERENCES patients(patient_id) ON DELETE CASCADE,
     FOREIGN KEY (doctor_id) REFERENCES doctors(doctor_id) ON DELETE CASCADE,
-    UNIQUE KEY unique_doctor_slot (doctor_id, appointment_date, appointment_time)
+    UNIQUE KEY unique_active_doctor_slot (doctor_id, appointment_date, active_appointment_time)
 );

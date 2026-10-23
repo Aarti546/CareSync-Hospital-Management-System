@@ -1,4 +1,4 @@
-# CarePulse - Hospital Management System (HMS)
+# CareSync - Hospital Management System (HMS)
 
 A complete, full-stack Hospital Management System website developed with **Python, Flask, MySQL, SQL, HTML5, CSS3, and JavaScript**, incorporating fundamental **Data Structures (FIFO Queue, Dictionaries, Lists)**.
 
@@ -46,19 +46,21 @@ A complete, full-stack Hospital Management System website developed with **Pytho
 - **Step-by-Step Booking Flow**:
   1. Select Patient
   2. Select Doctor & Date
-  3. **Live Time Slot Selector**:
+  3. **Live Time Slot Selector**, filtered by the doctor's configured working days and hours:
      - 10:00 AM &rarr; Booked ❌ *(Locked to prevent duplicate booking)*
      - 10:30 AM &rarr; Available ✅ *(Clickable)*
      - 11:00 AM &rarr; Booked ❌
      - 11:30 AM &rarr; Available ✅
   4. Reason for Visit & Initial Status (`Confirmed` or `Waiting`).
-- **Strict Verification**: Python and SQL verify active bookings for the selected doctor, date, and slot to guarantee no overlapping consultations can occur.
-- **Reschedule & Cancel**: Reschedule appointments to a different date/slot or cancel them to immediately free up the doctor's time slot for other patients.
+- **Strict Verification**: Past dates, invalid time slots, unavailable working hours, and active slot conflicts are rejected by the server and database.
+- **Reschedule & Cancel**: Rescheduling checks the doctor's schedule and slot conflicts. Cancelling frees the slot while retaining the cancelled appointment record.
+- **Existing database migration**: On startup, SQLite and MySQL databases migrate the old all-status slot constraint to an active-appointments-only constraint.
 
 ### 🧠 5. Patient Waiting Room (FIFO Queue)
 - Dedicated waiting room board (`/queue`).
-- Patients marked as **Waiting** automatically join the FIFO queue.
+- Patients marked as **Waiting** for today automatically join the FIFO queue; future appointments join when their date arrives.
 - Clinic reception or doctor clicks **"Call Next Patient"** (`dequeue()`), calling the next patient in line and updating their status.
+- Queue order is reconstructed from the persisted waiting timestamp after an app restart, and tickets are removed when an appointment leaves the waiting state.
 
 ---
 

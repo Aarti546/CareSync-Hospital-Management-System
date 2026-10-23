@@ -1,5 +1,5 @@
 """
-CarePulse Hospital Management System - Automated GitHub Push Utility
+CareSync Hospital Management System - Automated GitHub Push Utility
 Creates a new repository on your GitHub account and uploads all codebase files
 directly via the GitHub REST API (No local Git client required).
 """
@@ -31,7 +31,7 @@ def make_github_request(url, method="GET", data=None, token=None):
     ctx = ssl._create_unverified_context()
     headers = {
         "Accept": "application/vnd.github.v3+json",
-        "User-Agent": "CarePulse-HMS-Uploader"
+        "User-Agent": "CareSync-HMS-Uploader"
     }
     if token:
         headers["Authorization"] = f"token {token}"
@@ -52,7 +52,7 @@ def make_github_request(url, method="GET", data=None, token=None):
 
 def push_project(token, repo_name="Hospital-Management-System", is_private=False):
     print("=" * 60)
-    print("🚀 CarePulse HMS -> GitHub Direct Uploader")
+    print("🚀 CareSync HMS -> GitHub Direct Uploader")
     print("=" * 60)
 
     # 1. Verify User Token

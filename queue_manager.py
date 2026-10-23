@@ -12,12 +12,20 @@ class WaitingQueue:
         self._queue = deque()
         self._counter = 100
 
-    def enqueue(self, patient_dict, doctor_dict=None, appointment_id=None, reason=None):
+    def enqueue(self, patient_dict, doctor_dict=None, appointment_id=None, reason=None, joined_time=None):
         """
         Add a patient to the end (rear) of the waiting queue.
         Patient data is stored as a Python Dictionary.
         """
         self._counter += 1
+        if hasattr(joined_time, "strftime"):
+            joined_time = joined_time.strftime("%I:%M %p")
+        elif joined_time:
+            try:
+                joined_time = datetime.fromisoformat(str(joined_time)).strftime("%I:%M %p")
+            except ValueError:
+                joined_time = str(joined_time)
+
         ticket = {
             "token_id": self._counter,
             "appointment_id": appointment_id,
@@ -30,7 +38,7 @@ class WaitingQueue:
             "doctor_name": doctor_dict.get("name") if doctor_dict else "General Duty",
             "department": doctor_dict.get("department") if doctor_dict else "OPD",
             "reason": reason or "Consultation",
-            "joined_time": datetime.now().strftime("%I:%M %p"),
+            "joined_time": joined_time or datetime.now().strftime("%I:%M %p"),
             "status": "Waiting"
         }
         self._queue.append(ticket)
@@ -77,6 +85,10 @@ class WaitingQueue:
                 del self._queue[i]
                 return True
         return False
+
+    def has_appointment(self, appointment_id):
+        """Checks whether an appointment already has a waiting ticket."""
+        return any(ticket.get("appointment_id") == appointment_id for ticket in self._queue)
 
 # Global instance of the waiting queue accessible across the Flask app
 patient_queue = WaitingQueue()

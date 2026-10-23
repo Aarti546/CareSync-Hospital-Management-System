@@ -15,31 +15,33 @@ init_db()
 def sync_waiting_queue():
     today_str = date.today().strftime("%Y-%m-%d")
     waiting_records = query_all("""
-        SELECT a.appointment_id, a.reason, p.patient_id, p.name as patient_name, p.age, p.phone, p.blood_group,
+        SELECT a.appointment_id, a.reason, a.waiting_since, p.patient_id, p.name as patient_name, p.age, p.phone, p.blood_group,
                d.doctor_id, d.name as doctor_name, d.department
         FROM appointments a
         JOIN patients p ON a.patient_id = p.patient_id
         JOIN doctors d ON a.doctor_id = d.doctor_id
         WHERE a.status = 'Waiting' AND a.appointment_date = %s
-        ORDER BY a.appointment_time ASC
+        ORDER BY a.waiting_since ASC, a.appointment_id ASC
     """, (today_str,))
     
-    # If queue is empty, repopulate from active 'Waiting' appointments
-    if patient_queue.is_empty():
-        for rec in waiting_records:
-            pt_dict = {
-                "patient_id": rec["patient_id"],
-                "name": rec["patient_name"],
-                "age": rec["age"],
-                "blood_group": rec["blood_group"],
-                "phone": rec["phone"]
-            }
-            doc_dict = {
-                "doctor_id": rec["doctor_id"],
-                "name": rec["doctor_name"],
-                "department": rec["department"]
-            }
-            patient_queue.enqueue(pt_dict, doc_dict, rec["appointment_id"], rec["reason"])
+    for rec in waiting_records:
+        if patient_queue.has_appointment(rec["appointment_id"]):
+            continue
+        pt_dict = {
+            "patient_id": rec["patient_id"],
+            "name": rec["patient_name"],
+            "age": rec["age"],
+            "blood_group": rec["blood_group"],
+            "phone": rec["phone"]
+        }
+        doc_dict = {
+            "doctor_id": rec["doctor_id"],
+            "name": rec["doctor_name"],
+            "department": rec["department"]
+        }
+        patient_queue.enqueue(
+            pt_dict, doc_dict, rec["appointment_id"], rec["reason"], rec["waiting_since"]
+        )
 
 sync_waiting_queue()
 
@@ -51,11 +53,51 @@ STANDARD_SLOTS = [
     "04:00 PM", "04:30 PM"
 ]
 
+def is_valid_appointment_date(value):
+    try:
+        return date.fromisoformat(value) >= date.today()
+    except (TypeError, ValueError):
+        return False
+
+
+def doctor_accepts_slot(doctor, appointment_date, appointment_time):
+    try:
+        scheduled_date = date.fromisoformat(str(appointment_date))
+        available_days = {
+            day.strip()[:3].lower()
+            for day in doctor["available_days"].split(",")
+            if day.strip()
+        }
+        start_time, end_time = doctor["available_time"].replace("–", "-").split("-", 1)
+        start = datetime.strptime(start_time.strip(), "%I:%M %p").time()
+        end = datetime.strptime(end_time.strip(), "%I:%M %p").time()
+        slot = datetime.strptime(appointment_time, "%I:%M %p").time()
+    except (AttributeError, TypeError, ValueError):
+        return False
+
+    return scheduled_date.strftime("%a").lower() in available_days and start <= slot < end
+
+
+@app.context_processor
+def inject_booking_options():
+    return {
+        "booking_patients": query_all(
+            "SELECT patient_id, name, phone FROM patients ORDER BY name ASC"
+        ),
+        "booking_doctors": query_all(
+            "SELECT doctor_id, name, department FROM doctors ORDER BY department ASC, name ASC"
+        ),
+        "booking_today_str": date.today().strftime("%Y-%m-%d"),
+        "db_type": get_db_type(),
+    }
+
+
 # ----------------------------------------------------
 # 🏠 1. HOME DASHBOARD
 # ----------------------------------------------------
 @app.route("/")
 def dashboard():
+    sync_waiting_queue()
     today_str = date.today().strftime("%Y-%m-%d")
 
     # Metrics
@@ -83,6 +125,21 @@ def dashboard():
         ORDER BY a.appointment_time ASC
     """, (today_str,))
 
+    booked_slots_by_doctor = {}
+    for appointment in appointments:
+        if appointment["status"] != "Cancelled":
+            booked_slots_by_doctor.setdefault(appointment["doctor_id"], set()).add(
+                appointment["appointment_time"].strip().upper()
+            )
+    available_doctors_count = sum(
+        any(
+            doctor_accepts_slot(doctor, today_str, slot)
+            and slot.upper() not in booked_slots_by_doctor.get(doctor["doctor_id"], set())
+            for slot in STANDARD_SLOTS
+        )
+        for doctor in doctors
+    )
+
     # Upcoming appointments (future dates)
     upcoming_appointments = query_all("""
         SELECT a.*, p.name as patient_name, d.name as doctor_name, d.department
@@ -106,7 +163,7 @@ def dashboard():
         total_patients=total_patients,
         total_doctors=total_doctors,
         today_appointments=today_appointments,
-        available_doctors_count=max(total_doctors - 2, 0),
+        available_doctors_count=available_doctors_count,
         doctors=doctors,
         departments=departments,
         appointments=appointments,
@@ -362,6 +419,13 @@ def get_doctor_slots():
     if not doctor_id or not date_val:
         return jsonify({"error": "doctor_id and date parameters are required"}), 400
 
+    if not is_valid_appointment_date(date_val):
+        return jsonify({"error": "date must be today or a future date"}), 400
+
+    doctor = query_one("SELECT * FROM doctors WHERE doctor_id = %s", (doctor_id,))
+    if not doctor:
+        return jsonify({"error": "doctor was not found"}), 404
+
     # Query existing active appointments for this doctor on this date
     booked_records = query_all("""
         SELECT appointment_time FROM appointments 
@@ -373,10 +437,12 @@ def get_doctor_slots():
     slot_data = []
     for slot in STANDARD_SLOTS:
         is_booked = slot.strip().upper() in booked_times
+        is_scheduled = doctor_accepts_slot(doctor, date_val, slot)
+        status = "Booked" if is_booked else "Available" if is_scheduled else "Unavailable"
         slot_data.append({
             "time": slot,
-            "status": "Booked" if is_booked else "Available",
-            "available": not is_booked
+            "status": status,
+            "available": not is_booked and is_scheduled
         })
 
     return jsonify({"doctor_id": doctor_id, "date": date_val, "slots": slot_data})
@@ -394,6 +460,27 @@ def book_appointment():
         flash("All fields (Patient, Doctor, Date, and Time Slot) are required.", "error")
         return redirect(url_for("appointments_list"))
 
+    if not is_valid_appointment_date(appointment_date):
+        flash("Appointment date must be today or a future date.", "error")
+        return redirect(url_for("appointments_list"))
+
+    if appointment_time not in STANDARD_SLOTS:
+        flash("Select a valid appointment time slot.", "error")
+        return redirect(url_for("appointments_list"))
+
+    doctor = query_one("SELECT * FROM doctors WHERE doctor_id = %s", (doctor_id,))
+    if not doctor:
+        flash("Selected doctor was not found.", "error")
+        return redirect(url_for("appointments_list"))
+
+    if not doctor_accepts_slot(doctor, appointment_date, appointment_time):
+        flash("The selected doctor is not available at that time on that day.", "error")
+        return redirect(url_for("appointments_list"))
+
+    if status not in ["Confirmed", "Waiting"]:
+        flash("Invalid initial appointment status.", "error")
+        return redirect(url_for("appointments_list"))
+
     # Strict double-booking check in Python + SQL
     conflict = query_one("""
         SELECT appointment_id FROM appointments 
@@ -406,16 +493,22 @@ def book_appointment():
 
     try:
         app_id = execute_query("""
-            INSERT INTO appointments (patient_id, doctor_id, appointment_date, appointment_time, reason, status)
-            VALUES (%s, %s, %s, %s, %s, %s)
-        """, (patient_id, doctor_id, appointment_date, appointment_time, reason, status))
+            INSERT INTO appointments
+                (patient_id, doctor_id, appointment_date, appointment_time, reason, status, waiting_since)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """, (
+            patient_id, doctor_id, appointment_date, appointment_time, reason, status,
+            datetime.now().isoformat(timespec="seconds") if status == "Waiting" else None
+        ))
 
         # If status is set to 'Waiting', automatically enqueue patient into FIFO queue!
-        if status == "Waiting":
+        if status == "Waiting" and appointment_date == date.today().strftime("%Y-%m-%d"):
             pt = query_one("SELECT * FROM patients WHERE patient_id = %s", (patient_id,))
             doc = query_one("SELECT * FROM doctors WHERE doctor_id = %s", (doctor_id,))
-            patient_queue.enqueue(pt, doc, app_id, reason)
-            flash(f"Appointment #{app_id} booked & patient added to Waiting Queue (Token #{patient_queue.size()})!", "success")
+            ticket = patient_queue.enqueue(pt, doc, app_id, reason)
+            flash(f"Appointment #{app_id} booked & patient added to Waiting Queue (Token #{ticket['token_id']})!", "success")
+        elif status == "Waiting":
+            flash(f"Appointment #{app_id} booked. It will join the waiting queue on {appointment_date}.", "success")
         else:
             flash(f"Appointment #{app_id} successfully confirmed for {appointment_date} at {appointment_time}!", "success")
 
@@ -432,27 +525,58 @@ def update_appointment_status(appointment_id):
         return redirect(url_for("appointments_list"))
 
     try:
-        execute_query("UPDATE appointments SET status = %s WHERE appointment_id = %s", (new_status, appointment_id))
-        
-        # If changed to Waiting, enqueue into FIFO queue
+        app_rec = query_one("""
+            SELECT a.*, p.name AS patient_name, p.age, p.phone, p.blood_group,
+                   d.name AS doctor_name, d.department
+            FROM appointments a
+            JOIN patients p ON a.patient_id = p.patient_id
+            JOIN doctors d ON a.doctor_id = d.doctor_id
+            WHERE a.appointment_id = %s
+        """, (appointment_id,))
+        if not app_rec:
+            flash(f"Appointment #{appointment_id} was not found.", "error")
+            return redirect(url_for("appointments_list"))
+
+        if app_rec["status"] == "Cancelled" and new_status != "Cancelled":
+            conflict = query_one("""
+                SELECT appointment_id FROM appointments
+                WHERE doctor_id = %s AND appointment_date = %s AND appointment_time = %s
+                  AND appointment_id != %s AND status != 'Cancelled'
+            """, (
+                app_rec["doctor_id"], app_rec["appointment_date"],
+                app_rec["appointment_time"], appointment_id
+            ))
+            if conflict:
+                flash("This cancelled appointment cannot be reactivated because its slot has been booked again.", "error")
+                return redirect(request.referrer or url_for("appointments_list"))
+
         if new_status == "Waiting":
-            app_rec = query_one("""
-                SELECT a.*, p.name as patient_name, p.age, p.phone, p.blood_group,
-                       d.name as doctor_name, d.department
-                FROM appointments a
-                JOIN patients p ON a.patient_id = p.patient_id
-                JOIN doctors d ON a.doctor_id = d.doctor_id
-                WHERE a.appointment_id = %s
-            """, (appointment_id,))
-            if app_rec:
-                pt_dict = {"patient_id": app_rec["patient_id"], "name": app_rec["patient_name"], "age": app_rec["age"], "blood_group": app_rec["blood_group"], "phone": app_rec["phone"]}
-                doc_dict = {"doctor_id": app_rec["doctor_id"], "name": app_rec["doctor_name"], "department": app_rec["department"]}
-                ticket = patient_queue.enqueue(pt_dict, doc_dict, appointment_id, app_rec["reason"])
-                flash(f"Appointment #{appointment_id} status updated to 'Waiting'. Assigned Queue Token #{ticket['token_id']}.", "success")
-        elif new_status in ["Completed", "Cancelled"]:
-            patient_queue.remove_by_appointment(appointment_id)
-            flash(f"Appointment #{appointment_id} marked as {new_status}.", "success")
+            waiting_since = app_rec["waiting_since"]
+            if app_rec["status"] != "Waiting":
+                waiting_since = datetime.now().isoformat(timespec="seconds")
         else:
+            waiting_since = None
+        execute_query(
+            "UPDATE appointments SET status = %s, waiting_since = %s WHERE appointment_id = %s",
+            (new_status, waiting_since, appointment_id)
+        )
+        
+        if new_status == "Waiting":
+            if str(app_rec["appointment_date"]) == date.today().strftime("%Y-%m-%d"):
+                if patient_queue.has_appointment(appointment_id):
+                    flash(f"Appointment #{appointment_id} is already in the waiting queue.", "info")
+                else:
+                    pt_dict = {"patient_id": app_rec["patient_id"], "name": app_rec["patient_name"], "age": app_rec["age"], "blood_group": app_rec["blood_group"], "phone": app_rec["phone"]}
+                    doc_dict = {"doctor_id": app_rec["doctor_id"], "name": app_rec["doctor_name"], "department": app_rec["department"]}
+                    ticket = patient_queue.enqueue(
+                        pt_dict, doc_dict, appointment_id, app_rec["reason"], waiting_since
+                    )
+                    flash(f"Appointment #{appointment_id} status updated to 'Waiting'. Assigned Queue Token #{ticket['token_id']}.", "success")
+            else:
+                patient_queue.remove_by_appointment(appointment_id)
+                flash(f"Appointment #{appointment_id} is marked Waiting and will join the queue on its appointment date.", "success")
+        elif new_status in ["Completed", "Cancelled", "Confirmed"]:
+            patient_queue.remove_by_appointment(appointment_id)
             flash(f"Appointment #{appointment_id} status updated to {new_status}.", "success")
 
     except Exception as e:
@@ -463,7 +587,10 @@ def update_appointment_status(appointment_id):
 @app.route("/appointments/cancel/<int:appointment_id>", methods=["POST"])
 def cancel_appointment(appointment_id):
     try:
-        execute_query("UPDATE appointments SET status = 'Cancelled' WHERE appointment_id = %s", (appointment_id,))
+        execute_query(
+            "UPDATE appointments SET status = 'Cancelled', waiting_since = NULL WHERE appointment_id = %s",
+            (appointment_id,)
+        )
         patient_queue.remove_by_appointment(appointment_id)
         flash(f"Appointment #{appointment_id} cancelled. Time slot is now freed up for other patients.", "success")
     except Exception as e:
@@ -480,7 +607,19 @@ def reschedule_appointment(appointment_id):
         flash("Appointment not found.", "error")
         return redirect(url_for("appointments_list"))
 
+    if not is_valid_appointment_date(new_date):
+        flash("Appointment date must be today or a future date.", "error")
+        return redirect(url_for("appointments_list"))
+
+    if new_time not in STANDARD_SLOTS:
+        flash("Select a valid appointment time slot.", "error")
+        return redirect(url_for("appointments_list"))
+
     doctor_id = app_rec["doctor_id"]
+    doctor = query_one("SELECT * FROM doctors WHERE doctor_id = %s", (doctor_id,))
+    if not doctor or not doctor_accepts_slot(doctor, new_date, new_time):
+        flash("The selected doctor is not available at that time on that day.", "error")
+        return redirect(url_for("appointments_list"))
 
     # Check conflict
     conflict = query_one("""
@@ -495,9 +634,10 @@ def reschedule_appointment(appointment_id):
     try:
         execute_query("""
             UPDATE appointments 
-            SET appointment_date = %s, appointment_time = %s, status = 'Confirmed'
+            SET appointment_date = %s, appointment_time = %s, status = 'Confirmed', waiting_since = NULL
             WHERE appointment_id = %s
         """, (new_date, new_time, appointment_id))
+        patient_queue.remove_by_appointment(appointment_id)
         flash(f"Appointment #{appointment_id} rescheduled to {new_date} at {new_time}.", "success")
     except Exception as e:
         flash(f"Error rescheduling: {str(e)}", "error")
@@ -510,17 +650,21 @@ def reschedule_appointment(appointment_id):
 # ----------------------------------------------------
 @app.route("/queue")
 def queue_view():
+    sync_waiting_queue()
     waiting_list = patient_queue.get_all()
     next_patient = patient_queue.peek()
     return render_template("queue.html", waiting_list=waiting_list, next_patient=next_patient, total_waiting=patient_queue.size())
 
 @app.route("/queue/call-next", methods=["POST"])
 def call_next():
+    next_patient = patient_queue.peek()
+    if next_patient and next_patient.get("appointment_id"):
+        execute_query(
+            "UPDATE appointments SET status = 'Completed', waiting_since = NULL WHERE appointment_id = %s",
+            (next_patient["appointment_id"],)
+        )
     served = patient_queue.dequeue()
     if served:
-        # Update corresponding appointment status to Completed in DB
-        if served.get("appointment_id"):
-            execute_query("UPDATE appointments SET status = 'Completed' WHERE appointment_id = %s", (served["appointment_id"],))
         flash(f"Now Calling Token #{served['token_id']} - Patient: {served['patient_name']} (Doctor: {served['doctor_name']})", "success")
     else:
         flash("Waiting queue is currently empty. No patients waiting.", "info")
@@ -535,5 +679,5 @@ def api_queue():
     })
 
 if __name__ == "__main__":
-    print(f"CarePulse Hospital Management System running with {get_db_type()}")
+    print(f"CareSync Hospital Management System running with {get_db_type()}")
     app.run(debug=True, host="127.0.0.1", port=5000)

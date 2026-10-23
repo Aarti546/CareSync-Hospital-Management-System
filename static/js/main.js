@@ -1,5 +1,5 @@
 // =========================================================
-// CarePulse Hospital Management System - Master JavaScript
+// CareSync Hospital Management System - Master JavaScript
 // =========================================================
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -73,10 +73,18 @@ function initSlotPicker() {
             return;
         }
 
+        if (timeHiddenInput) timeHiddenInput.value = '';
         slotContainer.innerHTML = '<p style="font-size:13px; color:#0284c7; padding:10px;">⏳ Checking doctor availability & booked appointments...</p>';
 
         fetch(`/api/doctor-slots?doctor_id=${doctorId}&date=${dateVal}`)
-            .then(res => res.json())
+            .then(res => {
+                if (!res.ok) {
+                    return res.json().then(data => {
+                        throw new Error(data.error || 'Unable to load doctor availability.');
+                    });
+                }
+                return res.json();
+            })
             .then(data => {
                 if (data.slots && data.slots.length > 0) {
                     let html = '<div class="slots-grid">';
@@ -87,10 +95,16 @@ function initSlotPicker() {
                                     ${slot.time} <span style="font-size:11px; margin-left:4px;">✅</span>
                                 </div>
                             `;
-                        } else {
+                        } else if (slot.status === 'Booked') {
                             html += `
                                 <div class="slot-btn booked" title="Conflict: Doctor is already booked for this slot">
                                     ${slot.time} <span style="font-size:11px; margin-left:4px;">❌</span>
+                                </div>
+                            `;
+                        } else {
+                            html += `
+                                <div class="slot-btn unavailable" title="Doctor is not scheduled for this time">
+                                    ${slot.time} <span style="font-size:11px; margin-left:4px;">—</span>
                                 </div>
                             `;
                         }
@@ -99,6 +113,7 @@ function initSlotPicker() {
                     html += '<div style="margin-top:10px; font-size:11.5px; color:#64748b; display:flex; gap:14px;">' +
                             '<span><b style="color:#16a34a;">✅ Available</b> (Click to pick)</span>' +
                             '<span><b style="color:#dc2626;">❌ Booked</b> (Locked to prevent double booking)</span>' +
+                            '<span><b style="color:#64748b;">— Unavailable</b> (Outside doctor schedule)</span>' +
                             '</div>';
                     slotContainer.innerHTML = html;
                 } else {
@@ -107,7 +122,7 @@ function initSlotPicker() {
             })
             .catch(err => {
                 console.error("Failed to load doctor slots", err);
-                slotContainer.innerHTML = '<p style="font-size:13px; color:#ef4444;">Failed to fetch live availability. Please check server.</p>';
+                slotContainer.innerHTML = `<p style="font-size:13px; color:#ef4444;">${err.message}</p>`;
             });
     }
 
